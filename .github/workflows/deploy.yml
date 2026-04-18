@@ -36,4 +36,4 @@ jobs:
         run: |
           sleep 10
           curl -f --retry 5 --retry-delay 3 \
-            http://${{ secrets.DEPLOY_HOST }}:8000/health
+            http://${{ secrets.DEPLOY_HOST }}:8001/health

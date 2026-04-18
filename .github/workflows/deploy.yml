@@ -34,6 +34,8 @@ jobs:
 
       - name: Health check
         run: |
-          sleep 10
-          curl -f --retry 5 --retry-delay 3 \
-            http://${{ secrets.DEPLOY_HOST }}:8001/health
+          sleep 5
+          ssh -i ~/.ssh/deploy_key \
+              -p ${{ secrets.DEPLOY_PORT }} \
+              ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+              'curl -sf --retry 5 --retry-delay 3 http://localhost:8001/health'

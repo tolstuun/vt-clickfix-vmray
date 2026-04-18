@@ -34,20 +34,22 @@ Developer pushes branch
    PR merged to main
          │
          ▼
-┌───────────────────────────────────────────────────┐
-│  GitHub Actions Deploy (deploy.yml)               │
-│  triggers on push to main                         │
-│                                                   │
-│  1. SSH into production server                    │
-│  2. git reset --hard origin/main                  │
-│  3. docker-compose up -d --build                  │
-│  4. curl /health (fails workflow if unhealthy)    │
-└───────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│  GitHub Actions Deploy (deploy.yml)                  │
+│  triggers on push to main                            │
+│                                                      │
+│  1. Write deploy private key + known_hosts           │
+│  2. SSH to 77.42.72.36:22 as deploy                  │
+│  3. git clone (first run) or git fetch+reset (update)│
+│  4. docker compose up -d --build                     │
+│  5. curl http://77.42.72.36:8000/health              │
+│     → fails workflow if unhealthy                    │
+└──────────────────────────────────────────────────────┘
          │
          ▼
-  Production server (85.243.239.92)
-  WSL2 / Ubuntu 24.04
-  SSH port: 2222
+  Production server — 77.42.72.36
+  Ubuntu 24.04 / Docker 29.x
+  repo at /opt/vt-clickfix-vmray
 ```
 
 ## Endpoints
@@ -90,12 +92,13 @@ All settings are read from environment variables (or `.env` file locally):
 
 ## GitHub Actions secrets (deploy)
 
-| Secret       | Description                  |
-|--------------|------------------------------|
-| DEPLOY_HOST  | Server public IP             |
-| DEPLOY_PORT  | SSH port (2222)              |
-| DEPLOY_USER  | Linux username on server     |
-| DEPLOY_KEY   | Ed25519 private key (PEM)    |
+| Secret           | Description                               |
+|------------------|-------------------------------------------|
+| DEPLOY_HOST      | Server public IP (77.42.72.36)            |
+| DEPLOY_PORT      | SSH port (22)                             |
+| DEPLOY_USER      | Linux username on server (deploy)         |
+| DEPLOY_KEY       | Ed25519 private key (PEM)                 |
+| DEPLOY_HOST_KEY  | Server ed25519 host key for known_hosts   |
 
 ## What is NOT in this iteration
 

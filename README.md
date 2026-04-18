@@ -70,7 +70,8 @@ See [docs/architecture.md](docs/architecture.md).
 
 | Secret | Value |
 |--------|-------|
-| `DEPLOY_HOST` | Server public IP |
-| `DEPLOY_PORT` | SSH port |
-| `DEPLOY_USER` | SSH username |
+| `DEPLOY_HOST` | Server public IP (77.42.72.36) |
+| `DEPLOY_PORT` | SSH port (22) |
+| `DEPLOY_USER` | SSH username (deploy) |
 | `DEPLOY_KEY` | Ed25519 private key (PEM) |
+| `DEPLOY_HOST_KEY` | Server ed25519 host key (known_hosts line) |

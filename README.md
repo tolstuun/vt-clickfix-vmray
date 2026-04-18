@@ -58,3 +58,19 @@ GET /health
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md).
+
+## CI/CD
+
+| Workflow | Trigger | Action |
+|----------|---------|--------|
+| CI (`ci.yml`) | push / PR on any branch | Run `pytest` |
+| Deploy (`deploy.yml`) | push to `main` | SSH into server, `git reset --hard origin/main`, `docker-compose up -d --build`, health check |
+
+### Required GitHub Actions secrets
+
+| Secret | Value |
+|--------|-------|
+| `DEPLOY_HOST` | Server public IP |
+| `DEPLOY_PORT` | SSH port |
+| `DEPLOY_USER` | SSH username |
+| `DEPLOY_KEY` | Ed25519 private key (PEM) |

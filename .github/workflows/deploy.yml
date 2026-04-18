@@ -1,0 +1,30 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            set -e
+            cd /home/tolstun/vt-clickfix-vmray
+            git fetch origin main
+            git reset --hard origin/main
+            docker-compose up -d --build
+
+      - name: Health check
+        run: |
+          sleep 10
+          curl -f --retry 5 --retry-delay 3 \
+            http://${{ secrets.DEPLOY_HOST }}:8000/health

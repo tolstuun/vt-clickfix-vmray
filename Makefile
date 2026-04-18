@@ -17,3 +17,6 @@ down:
 
 logs:
 	docker compose logs -f app
+
+migrate:
+	docker compose run --rm app alembic upgrade head

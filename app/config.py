@@ -6,7 +6,7 @@ class Settings(BaseSettings):
 
     app_name: str = "vt-clickfix-vmray"
     app_env: str = "development"
-    database_url: str = "postgresql://app:app@db:5432/app"
+    database_url: str = "postgresql+asyncpg://app:app@db:5432/app"
 
 
 settings = Settings()

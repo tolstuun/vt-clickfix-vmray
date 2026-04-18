@@ -1,8 +1,8 @@
-# Architecture — Iteration 1: Bootstrap + CI/CD
+# Architecture — Iteration 2: Postgres Integration
 
 ## Overview
 
-Minimal runnable service with a health endpoint and Postgres, with automated CI and SSH-based deployment to the production server.
+FastAPI service with async Postgres connectivity, Alembic migrations, and a health endpoint that reports both application and database status.
 
 ## Component diagram
 
@@ -13,7 +13,7 @@ Minimal runnable service with a health endpoint and Postgres, with automated CI 
 │  ┌─────────────────────┐   ┌─────────────────────┐  │
 │  │      app            │   │       db            │  │
 │  │  FastAPI / uvicorn  │──▶│   PostgreSQL 16     │  │
-│  │  :8000              │   │   :5432             │  │
+│  │  :8000 (host:8001)  │   │   :5432             │  │
 │  └─────────────────────┘   └─────────────────────┘  │
 └─────────────────────────────────────────────────────┘
 ```
@@ -26,8 +26,7 @@ Developer pushes branch
         ▼
 ┌───────────────────┐
 │  GitHub Actions   │
-│  CI (ci.yml)      │  ← triggers on every push / PR
-│  pytest tests     │
+│  CI (ci.yml)      │  ← runs pytest (testcontainers spins up Postgres)
 └────────┬──────────┘
          │ pass
          ▼
@@ -36,43 +35,48 @@ Developer pushes branch
          ▼
 ┌──────────────────────────────────────────────────────┐
 │  GitHub Actions Deploy (deploy.yml)                  │
-│  triggers on push to main                            │
 │                                                      │
-│  1. Write deploy private key + known_hosts           │
-│  2. SSH to 77.42.72.36:22 as deploy                  │
-│  3. git clone (first run) or git fetch+reset (update)│
-│  4. docker compose up -d --build                     │
-│  5. curl http://77.42.72.36:8000/health              │
+│  1. SSH to 77.42.72.36:22 as deploy                  │
+│  2. git clone (first run) or git fetch+reset         │
+│  3. docker compose up -d --build                     │
+│  4. curl localhost:8001/health via SSH               │
 │     → fails workflow if unhealthy                    │
 └──────────────────────────────────────────────────────┘
          │
          ▼
   Production server — 77.42.72.36
-  Ubuntu 24.04 / Docker 29.x
   repo at /opt/vt-clickfix-vmray
 ```
 
 ## Endpoints
 
-| Method | Path      | Description        |
-|--------|-----------|--------------------|
-| GET    | /health   | Liveness check     |
+| Method | Path      | Healthy response (200)                    | DB down (503)                        |
+|--------|-----------|-------------------------------------------|--------------------------------------|
+| GET    | /health   | `{"status":"healthy","db":"ok"}`          | `{"status":"healthy","db":"error"}`  |
 
 ## Directory structure
 
 ```
 app/
-  main.py          # FastAPI application entry point
-  config.py        # Environment-based configuration (pydantic-settings)
+  main.py          # FastAPI app + async lifespan (engine init/dispose)
+  config.py        # pydantic-settings (DATABASE_URL, APP_ENV, APP_NAME)
   api/
-    health.py      # GET /health router
-  db/              # (placeholder — Postgres integration in iteration 3)
+    health.py      # GET /health — async, checks DB with SELECT 1
+  db/
+    base.py        # SQLAlchemy DeclarativeBase (shared by all models)
+    session.py     # make_engine(url) → AsyncEngine
   models/          # (placeholder — ORM models in iteration 3)
   schemas/         # (placeholder — Pydantic schemas in iteration 3)
   services/        # (placeholder — business logic in later iterations)
   workers/         # (placeholder — background workers in later iterations)
+alembic/
+  env.py           # reads DATABASE_URL env var, strips +asyncpg for sync
+  versions/
+    0001_initial.py  # baseline (empty)
+alembic.ini        # script location, fallback sync URL
 tests/
-  test_health.py   # API tests for /health
+  conftest.py      # disables testcontainers Ryuk (no Docker Hub needed)
+  test_health.py   # integration tests: DB ok → 200, DB down → 503
 docs/
   architecture.md  # this file
 .github/workflows/
@@ -82,13 +86,13 @@ docs/
 
 ## Configuration
 
-All settings are read from environment variables (or `.env` file locally):
+| Variable       | Default                                      | Description           |
+|----------------|----------------------------------------------|-----------------------|
+| APP_NAME       | vt-clickfix-vmray                            | Application name      |
+| APP_ENV        | development                                  | Runtime environment   |
+| DATABASE_URL   | postgresql+asyncpg://app:app@db:5432/app     | Postgres DSN (async)  |
 
-| Variable       | Default                                  | Description         |
-|----------------|------------------------------------------|---------------------|
-| APP_NAME       | vt-clickfix-vmray                        | Application name    |
-| APP_ENV        | development                              | Runtime environment |
-| DATABASE_URL   | postgresql://app:app@db:5432/app         | Postgres DSN        |
+Alembic derives its sync URL from `DATABASE_URL` by stripping `+asyncpg`.
 
 ## GitHub Actions secrets (deploy)
 
@@ -98,11 +102,11 @@ All settings are read from environment variables (or `.env` file locally):
 | DEPLOY_PORT      | SSH port (22)                             |
 | DEPLOY_USER      | Linux username on server (deploy)         |
 | DEPLOY_KEY       | Ed25519 private key (PEM)                 |
-| DEPLOY_HOST_KEY  | Server ed25519 host key for known_hosts   |
+| DEPLOY_HOST_KEY  | Server ed25519 host key (known_hosts)     |
 
 ## What is NOT in this iteration
 
 - VirusTotal polling
 - VMRay integration
-- Database migrations / ORM models
+- ORM models (next iteration)
 - Any business logic

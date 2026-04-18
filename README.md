@@ -48,11 +48,21 @@ make run
 make test
 ```
 
+## Database migrations
+
+```bash
+# Run Alembic migrations inside Docker
+make migrate
+```
+
 ## Health check
 
 ```
-GET /health
-→ {"status": "healthy"}
+GET /health — app + DB healthy
+→ 200 {"status": "healthy", "db": "ok"}
+
+GET /health — DB unreachable
+→ 503 {"status": "healthy", "db": "error"}
 ```
 
 ## Architecture

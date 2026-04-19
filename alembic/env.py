@@ -2,6 +2,7 @@ import os
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+import app.models  # noqa: F401 — registers all ORM models with Base.metadata
 from app.db.base import Base
 
 config = context.config

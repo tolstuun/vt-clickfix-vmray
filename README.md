@@ -23,7 +23,7 @@ make logs  # view logs
 make down  # stop
 ```
 
-The API is available at http://localhost:8080.
+The API is available at http://localhost:8001.
 
 ## Test
 

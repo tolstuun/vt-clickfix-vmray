@@ -17,9 +17,10 @@ env/
 .coverage
 htmlcov/
 
-# Environment
+# Environment — ignore real env files but track the example template
 .env
 .env.*
+!.env.example
 
 # IDE
 .idea/

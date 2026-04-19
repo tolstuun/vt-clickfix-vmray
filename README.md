@@ -77,17 +77,51 @@ GET /health
 
 ## Configuration
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | `postgresql+asyncpg://app:app@db:5432/app` | Postgres DSN |
-| `VT_API_KEY` | `""` | VirusTotal API key (empty = disabled) |
-| `VT_POLL_INTERVAL_SECONDS` | `300` | VT polling interval |
-| `VT_ENABLED` | `false` | Enable VT scheduler job |
-| `VMRAY_URL` | `""` | VMRay base URL (empty = disabled) |
-| `VMRAY_API_KEY` | `""` | VMRay API key |
-| `VMRAY_POLL_INTERVAL_SECONDS` | `60` | VMRay polling interval |
-| `VMRAY_ENABLED` | `false` | Enable VMRay scheduler jobs |
-| `PIPELINE_AUTOSTART` | `false` | Start scheduler on app startup |
+All configuration is read from environment variables. Docker Compose loads them
+from `/opt/vt-clickfix-vmray/.env` on the server (or `.env` in the project root
+locally). See `.env.example` for every variable with documentation.
+
+| Variable | Default | Secret? | Description |
+|----------|---------|---------|-------------|
+| `DATABASE_URL` | `postgresql+asyncpg://app:app@db:5432/app` | No | Postgres DSN |
+| `APP_ENV` | `development` | No | Runtime environment |
+| `VT_API_KEY` | `""` | **Yes** | VirusTotal API key (empty = disabled) |
+| `VT_POLL_INTERVAL_SECONDS` | `300` | No | VT polling interval |
+| `VT_ENABLED` | `false` | No | Enable VT scheduler job |
+| `VMRAY_URL` | `""` | **Yes** | VMRay instance base URL (empty = disabled) |
+| `VMRAY_API_KEY` | `""` | **Yes** | VMRay API key |
+| `VMRAY_POLL_INTERVAL_SECONDS` | `60` | No | VMRay polling interval |
+| `VMRAY_ENABLED` | `false` | No | Enable VMRay scheduler jobs |
+| `PIPELINE_AUTOSTART` | `false` | No | Start scheduler on app startup |
+
+### Server-side secret file
+
+Secrets live only on the server at `/opt/vt-clickfix-vmray/.env`.
+This file is **never committed** (covered by `.gitignore`).
+The deploy workflow creates an empty `.env` on first deploy so Docker Compose
+never fails; you then populate it manually once.
+
+To enable live integration testing, run this once on the server:
+
+```bash
+cat > /opt/vt-clickfix-vmray/.env <<'EOF'
+APP_ENV=production
+VT_API_KEY=<your-virustotal-api-key>
+VT_POLL_INTERVAL_SECONDS=300
+VT_ENABLED=true
+VMRAY_URL=<your-vmray-instance-url>
+VMRAY_API_KEY=<your-vmray-api-key>
+VMRAY_POLL_INTERVAL_SECONDS=60
+VMRAY_ENABLED=true
+PIPELINE_AUTOSTART=true
+EOF
+chmod 600 /opt/vt-clickfix-vmray/.env
+cd /opt/vt-clickfix-vmray && docker compose up -d
+```
+
+Replace the `<placeholder>` values with real credentials. After writing the file,
+restart the service with `docker compose up -d` (no rebuild needed for env-only
+changes).
 
 ## Architecture
 

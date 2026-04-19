@@ -30,6 +30,10 @@ jobs:
                  git clone https://github.com/tolstuun/vt-clickfix-vmray.git "$REPO"
                fi
                cd "$REPO"
+               # Ensure .env exists so docker compose env_file never fails.
+               # Real secrets are added manually; an empty file means the app
+               # starts without credentials (all features guarded by is_configured).
+               [ -f .env ] || touch .env
                docker compose up -d --build'
 
       - name: Health check

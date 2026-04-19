@@ -105,11 +105,9 @@ class VMRaySubmitPipeline:
                 url.status = "failed"
                 continue
 
-            submission_id = str(
-                raw.get("data", [{}])[0].get("submission_id", "")
-                if isinstance(raw.get("data"), list)
-                else raw.get("submission_id", "")
-            )
+            # SampleSubmit response: data.submissions[0].submission_id (int)
+            subs = raw.get("data", {}).get("submissions", [])
+            submission_id = str(subs[0]["submission_id"]) if subs else None
             self._session.add(
                 VMRaySubmission(
                     id=uuid.uuid4(),
@@ -151,21 +149,21 @@ class VMRayPollPipeline:
                 continue
 
             polled += 1
+            # SubmissionItem response: data is a single Submission object
             data = raw.get("data", {})
-            verdict = data.get("verdict") or data.get("sample_verdict")
-            score = data.get("vti_score") or data.get("sample_vti_score")
-            status = data.get("submission_status") or data.get("status", "")
+            verdict = data.get("submission_verdict")      # VerdictTypeEnum | null
+            score = data.get("submission_score")          # int | null
+            finished = data.get("submission_finished", False)  # bool
 
-            if verdict or status in ("finished", "inwork"):
-                sub.verdict = verdict
-                sub.score = score
-                sub.raw_response = raw
-                if status == "finished" or verdict:
-                    sub.completed_at = datetime.now(tz=timezone.utc)
-                    url = await self._session.get(URL, sub.url_id)
-                    if url:
-                        url.status = "done"
-                    completed += 1
+            sub.verdict = verdict
+            sub.score = score
+            sub.raw_response = raw
+            if finished:
+                sub.completed_at = datetime.now(tz=timezone.utc)
+                url = await self._session.get(URL, sub.url_id)
+                if url:
+                    url.status = "done"
+                completed += 1
 
         await self._session.commit()
         return {"status": "ok", "polled": polled, "completed": completed}

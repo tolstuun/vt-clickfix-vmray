@@ -180,9 +180,55 @@ Alembic derives its sync URL from `DATABASE_URL` by stripping `+asyncpg`.
 | DEPLOY_KEY       | Ed25519 private key (PEM)                 |
 | DEPLOY_HOST_KEY  | Server ed25519 host key (known_hosts)     |
 
+## Exact API contracts
+
+### VirusTotal (source: https://docs.virustotal.com/reference/overview)
+
+| Property | Value |
+|----------|-------|
+| Endpoint | `GET https://www.virustotal.com/api/v3/comments` |
+| Auth | `x-apikey: <key>` header |
+| Parameters | `limit` (int, default 10), `filter` (string), `cursor` (string) |
+| Filter | `filter=tag:clickfix` — TAG-BASED, not full-text search. Returns only comments explicitly tagged "clickfix" by VT users. Comments mentioning "clickfix" in body text but without the tag are excluded. |
+| Pagination | `meta.cursor` in response → pass as `cursor=` param |
+| Comment fields | `attributes.text` (string), `attributes.date` (Unix timestamp int), `attributes.tags` (string[]), `attributes.votes` ({positive, negative, abuse}), `attributes.html` (string). No `author` field in documented API. |
+
+### VMRay (source: .local_docs/vmray — Cloud API Reference v2026.2.1)
+
+**Submit URL** — `POST /rest/sample/submit`
+- Auth: `Authorization: api_key <key>` header
+- Body: multipart form, field `sample_url=<url>`
+- Response schema `SampleSubmit`:
+  ```
+  { "result": "ok",
+    "data": {          ← SubmisssionResult
+      "errors": [...],
+      "submissions": [{ "submission_id": <int>, "submission_finished": false, ... }],
+      ...
+    } }
+  ```
+- Submission ID extraction: `response["data"]["submissions"][0]["submission_id"]` (integer)
+
+**Get Submission** — `GET /rest/submission/<submission_id>`
+- Auth: `Authorization: api_key <key>` header
+- Response schema `SubmissionItem`:
+  ```
+  { "result": "ok",
+    "data": {          ← Submission object
+      "submission_id": <int>,
+      "submission_finished": <bool>,          ← completion indicator
+      "submission_verdict": <"malicious"|"suspicious"|"clean"|null>,
+      "submission_score": <int|null>,
+      ...
+    } }
+  ```
+- Completion: `submission_finished == true`
+- Verdict values: `"malicious"`, `"suspicious"`, `"clean"`, or `null` (not yet determined)
+
 ## What is NOT in this iteration
 
 - Dashboard UI
 - Authentication / authorization on internal endpoints
 - Pagination cursor for VT comment polling
 - ORM relationships (lazy loading) — queries use explicit joins/subqueries
+- Local text filtering for VT comments (current approach relies on tag filter only)

@@ -1,3 +1,13 @@
+"""Pipeline integration tests.
+
+Mock payloads match actual API contracts:
+- VT: GET /api/v3/comments response schema (meta.cursor, data[].attributes.{text,date,tags,votes})
+- VMRay submit: POST /rest/sample/submit → SampleSubmit schema
+  { "result": "ok", "data": { "submissions": [{"submission_id": int, ...}], ... } }
+- VMRay poll: GET /rest/submission/<id> → SubmissionItem schema
+  { "result": "ok", "data": { "submission_id": int, "submission_finished": bool,
+                               "submission_verdict": str|null, "submission_score": int|null, ... } }
+"""
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
@@ -15,16 +25,90 @@ from app.services.pipeline import (
 )
 from app.services.vt_client import VTCommentData
 
+# ---------------------------------------------------------------------------
+# Realistic mock payloads (matching documented API schemas)
+# ---------------------------------------------------------------------------
 
-def _make_vt_comment_data(comment_id: str, content: str) -> VTCommentData:
-    return VTCommentData(
+def _vt_comment_response(comment_id: str, text: str, tags: list[str] | None = None) -> dict:
+    """Mimics a VT GET /api/v3/comments data item."""
+    return {
+        "type": "comment",
+        "id": comment_id,
+        "attributes": {
+            "text": text,
+            "html": f"<p>{text}</p>",
+            "date": 1713484800,  # 2024-04-19 00:00:00 UTC
+            "tags": tags or ["clickfix"],
+            "votes": {"positive": 3, "negative": 0, "abuse": 0},
+        },
+        "links": {"self": f"https://www.virustotal.com/api/v3/comments/{comment_id}"},
+    }
+
+
+def _vt_comments_page(comment_id: str, text: str, cursor: str | None = None) -> tuple:
+    """Returns (list[VTCommentData], next_cursor) matching VTClient.get_comments output."""
+    item = _vt_comment_response(comment_id, text)
+    data = VTCommentData(
         comment_id=comment_id,
-        author="tester",
-        content=content,
+        author="",  # not in documented API
+        content=text,
         published_at=None,
-        raw={"id": comment_id, "attributes": {"text": content}},
+        raw=item,
     )
+    return [data], cursor
 
+
+def _vmray_submit_response(submission_id: int = 98765) -> dict:
+    """Mimics POST /rest/sample/submit → SampleSubmit schema."""
+    return {
+        "result": "ok",
+        "data": {
+            "errors": [],
+            "jobs": [],
+            "static_jobs": [],
+            "reputation_jobs": [],
+            "samples": [{"sample_id": 11111}],
+            "submissions": [
+                {
+                    "submission_id": submission_id,
+                    "submission_finished": False,
+                    "submission_verdict": None,
+                    "submission_score": None,
+                    "submission_filename": "https://example.com/",
+                }
+            ],
+        },
+        "continuation_id": None,
+        "truncated": False,
+    }
+
+
+def _vmray_poll_response(
+    submission_id: int = 98765,
+    finished: bool = True,
+    verdict: str | None = "malicious",
+    score: int | None = 100,
+) -> dict:
+    """Mimics GET /rest/submission/<id> → SubmissionItem schema."""
+    return {
+        "result": "ok",
+        "data": {
+            "submission_id": submission_id,
+            "submission_finished": finished,
+            "submission_verdict": verdict,
+            "submission_score": score,
+            "submission_sample_verdict": verdict,
+            "submission_filename": "https://example.com/",
+            "submission_status": "inwork" if not finished else "finished",
+        },
+        "continuation_id": None,
+        "truncated": False,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def mock_vt_client():
@@ -38,12 +122,14 @@ def mock_vt_client():
 def mock_vmray_client():
     client = MagicMock()
     client.is_configured = True
-    client.submit_url = AsyncMock(return_value={"submission_id": "sub-123"})
-    client.get_submission = AsyncMock(return_value={
-        "data": {"verdict": "malicious", "submission_status": "finished"}
-    })
+    client.submit_url = AsyncMock(return_value=_vmray_submit_response())
+    client.get_submission = AsyncMock(return_value=_vmray_poll_response())
     return client
 
+
+# ---------------------------------------------------------------------------
+# VTPipeline tests
+# ---------------------------------------------------------------------------
 
 async def test_vt_pipeline_disabled_when_not_configured(db_session):
     client = MagicMock()
@@ -54,10 +140,10 @@ async def test_vt_pipeline_disabled_when_not_configured(db_session):
 
 
 async def test_vt_pipeline_stores_new_comments(db_session, mock_vt_client):
-    cid = f"test-comment-{uuid.uuid4()}"
-    mock_vt_client.get_comments = AsyncMock(
-        return_value=([_make_vt_comment_data(cid, "clickfix payload at hxxp://bad[.]com/x")], None)
-    )
+    cid = f"u-{uuid.uuid4().hex}-abc"
+    comments, cursor = _vt_comments_page(cid, "clickfix payload at hxxp://bad[.]com/x")
+    mock_vt_client.get_comments = AsyncMock(return_value=(comments, cursor))
+
     result = await VTPipeline(db_session, mock_vt_client).run()
     assert result["status"] == "ok"
     assert result["fetched"] == 1
@@ -65,26 +151,43 @@ async def test_vt_pipeline_stores_new_comments(db_session, mock_vt_client):
 
     stored = await db_session.scalar(select(VTComment).where(VTComment.comment_id == cid))
     assert stored is not None
-    assert stored.author == "tester"
+    assert stored.author == ""  # not in documented VT API response
+    # raw_response stores the full documented VT comment item
+    assert stored.raw_response["attributes"]["tags"] == ["clickfix"]
+    assert stored.raw_response["attributes"]["votes"]["positive"] == 3
 
 
 async def test_vt_pipeline_skips_existing_comments(db_session, mock_vt_client):
-    cid = f"existing-{uuid.uuid4()}"
-    mock_vt_client.get_comments = AsyncMock(
-        return_value=([_make_vt_comment_data(cid, "text")], None)
-    )
-    # Insert first time
+    cid = f"u-{uuid.uuid4().hex}-abc"
+    comments, _ = _vt_comments_page(cid, "some text")
+    mock_vt_client.get_comments = AsyncMock(return_value=(comments, None))
+
     await VTPipeline(db_session, mock_vt_client).run()
-    # Insert second time — should skip
     result = await VTPipeline(db_session, mock_vt_client).run()
     assert result["new"] == 0
 
 
+async def test_vt_pipeline_stores_raw_response(db_session, mock_vt_client):
+    cid = f"u-{uuid.uuid4().hex}-raw"
+    item = _vt_comment_response(cid, "hxxp://example[.]com/path")
+    data = VTCommentData(comment_id=cid, author="", content=item["attributes"]["text"],
+                         published_at=None, raw=item)
+    mock_vt_client.get_comments = AsyncMock(return_value=([data], None))
+
+    await VTPipeline(db_session, mock_vt_client).run()
+    stored = await db_session.scalar(select(VTComment).where(VTComment.comment_id == cid))
+    assert stored.raw_response["type"] == "comment"
+    assert stored.raw_response["id"] == cid
+
+
+# ---------------------------------------------------------------------------
+# URLProcessPipeline tests
+# ---------------------------------------------------------------------------
+
 async def test_url_process_pipeline_extracts_urls(db_session, mock_vt_client):
-    cid = f"url-test-{uuid.uuid4()}"
-    mock_vt_client.get_comments = AsyncMock(
-        return_value=([_make_vt_comment_data(cid, "hxxps://malware[.]io/stage2 is bad")], None)
-    )
+    cid = f"u-{uuid.uuid4().hex}-url"
+    comments, _ = _vt_comments_page(cid, "hxxps://malware[.]io/stage2 is bad")
+    mock_vt_client.get_comments = AsyncMock(return_value=(comments, None))
     await VTPipeline(db_session, mock_vt_client).run()
 
     result = await URLProcessPipeline(db_session).run()
@@ -99,16 +202,19 @@ async def test_url_process_pipeline_extracts_urls(db_session, mock_vt_client):
 
 
 async def test_url_process_pipeline_deduplicates(db_session, mock_vt_client):
-    cid = f"dup-test-{uuid.uuid4()}"
-    mock_vt_client.get_comments = AsyncMock(
-        return_value=([_make_vt_comment_data(cid, "hxxp://dup[.]site/x")], None)
-    )
+    cid = f"u-{uuid.uuid4().hex}-dup"
+    comments, _ = _vt_comments_page(cid, "hxxp://dup[.]site/x")
+    mock_vt_client.get_comments = AsyncMock(return_value=(comments, None))
     await VTPipeline(db_session, mock_vt_client).run()
 
     result1 = await URLProcessPipeline(db_session).run()
     result2 = await URLProcessPipeline(db_session).run()
     assert result2["new_urls"] == 0
 
+
+# ---------------------------------------------------------------------------
+# VMRaySubmitPipeline tests
+# ---------------------------------------------------------------------------
 
 async def test_vmray_submit_pipeline_disabled(db_session):
     client = MagicMock()
@@ -139,7 +245,33 @@ async def test_vmray_submit_pipeline_submits_pending(db_session, mock_vmray_clie
         select(VMRaySubmission).where(VMRaySubmission.url_id == url_obj.id)
     )
     assert sub is not None
+    # submission_id extracted from data.submissions[0].submission_id
+    assert sub.submission_id == "98765"
 
+
+async def test_vmray_submit_stores_full_raw_response(db_session, mock_vmray_client):
+    url_obj = URL(
+        id=uuid.uuid4(),
+        url_hash=f"hash-{uuid.uuid4().hex}",
+        original_defanged="hxxp://rawstore[.]test/x",
+        normalized_url="http://rawstore.test/x",
+        status="pending",
+    )
+    db_session.add(url_obj)
+    await db_session.commit()
+
+    await VMRaySubmitPipeline(db_session, mock_vmray_client).run()
+
+    sub = await db_session.scalar(
+        select(VMRaySubmission).where(VMRaySubmission.url_id == url_obj.id)
+    )
+    assert sub.raw_response["result"] == "ok"
+    assert "submissions" in sub.raw_response["data"]
+
+
+# ---------------------------------------------------------------------------
+# VMRayPollPipeline tests
+# ---------------------------------------------------------------------------
 
 async def test_vmray_poll_pipeline_disabled(db_session):
     client = MagicMock()
@@ -162,14 +294,15 @@ async def test_vmray_poll_pipeline_completes_submission(db_session, mock_vmray_c
     sub = VMRaySubmission(
         id=uuid.uuid4(),
         url_id=url_obj.id,
-        submission_id="sub-poll-001",
+        submission_id="98765",
     )
     db_session.add(sub)
     await db_session.commit()
 
-    mock_vmray_client.get_submission = AsyncMock(return_value={
-        "data": {"verdict": "malicious", "submission_status": "finished"}
-    })
+    mock_vmray_client.get_submission = AsyncMock(
+        return_value=_vmray_poll_response(submission_id=98765, finished=True,
+                                          verdict="malicious", score=100)
+    )
 
     result = await VMRayPollPipeline(db_session, mock_vmray_client).run()
     assert result["status"] == "ok"
@@ -177,3 +310,42 @@ async def test_vmray_poll_pipeline_completes_submission(db_session, mock_vmray_c
 
     await db_session.refresh(url_obj)
     assert url_obj.status == "done"
+    await db_session.refresh(sub)
+    assert sub.verdict == "malicious"
+    assert sub.score == 100
+    assert sub.completed_at is not None
+
+
+async def test_vmray_poll_pipeline_not_finished_yet(db_session, mock_vmray_client):
+    """When submission_finished=False, URL stays submitted and completed count is 0."""
+    url_obj = URL(
+        id=uuid.uuid4(),
+        url_hash=f"hash-{uuid.uuid4().hex}",
+        original_defanged="hxxp://pending[.]test/x",
+        normalized_url="http://pending.test/x",
+        status="submitted",
+    )
+    db_session.add(url_obj)
+    await db_session.flush()
+
+    sub = VMRaySubmission(
+        id=uuid.uuid4(),
+        url_id=url_obj.id,
+        submission_id="11111",
+    )
+    db_session.add(sub)
+    await db_session.commit()
+
+    mock_vmray_client.get_submission = AsyncMock(
+        return_value=_vmray_poll_response(
+            submission_id=11111, finished=False, verdict=None, score=None
+        )
+    )
+
+    result = await VMRayPollPipeline(db_session, mock_vmray_client).run()
+    assert result["completed"] == 0
+
+    await db_session.refresh(url_obj)
+    assert url_obj.status == "submitted"  # unchanged
+    await db_session.refresh(sub)
+    assert sub.completed_at is None

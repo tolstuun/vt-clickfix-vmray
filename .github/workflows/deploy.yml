@@ -44,6 +44,6 @@ jobs:
               ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
               'set -e
                cd /opt/vt-clickfix-vmray
-               curl -sf --retry 5 --retry-delay 3 http://localhost:80/health
+               curl -sf --retry 5 --retry-delay 3 http://localhost:8001/health
                docker compose exec -T app test -f alembic.ini
-               curl -sf -X POST http://localhost:80/internal/vt/poll'
+               curl -sf -X POST http://localhost:8001/internal/vt/poll'

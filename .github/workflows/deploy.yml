@@ -38,8 +38,12 @@ jobs:
 
       - name: Health check
         run: |
-          sleep 5
+          sleep 10
           ssh -i ~/.ssh/deploy_key \
               -p ${{ secrets.DEPLOY_PORT }} \
               ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
-              'curl -sf --retry 5 --retry-delay 3 http://localhost:8001/health'
+              'set -e
+               cd /opt/vt-clickfix-vmray
+               curl -sf --retry 5 --retry-delay 3 http://localhost:8001/health
+               docker compose exec -T app test -f alembic.ini
+               curl -sf -X POST http://localhost:8001/internal/vt/poll'

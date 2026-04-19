@@ -3,7 +3,11 @@ import re
 from urllib.parse import urlparse, urlunparse
 
 _DEFANGED_RE = re.compile(r"hxxps?://[^\s<>\"')]+", re.IGNORECASE)
-_SOURCE_PHRASE_RE = re.compile(r'IOC(?:s)?\s+found\s+on\s+"([^"]+)"', re.IGNORECASE)
+# Matches both quoted ("ThreatFox") and plain (ThreatFox) source names after the phrase.
+_SOURCE_PHRASE_RE = re.compile(
+    r'IOC(?:s)?\s+found\s+on\s+(?:"([^"]+)"|(\S+))',
+    re.IGNORECASE,
+)
 
 
 def _refang(url: str) -> str:
@@ -38,7 +42,10 @@ def parse_source_from_comment(text: str) -> str | None:
     Returns the quoted source name, or None if the phrase is absent.
     """
     m = _SOURCE_PHRASE_RE.search(text)
-    return m.group(1) if m else None
+    if not m:
+        return None
+    value = m.group(1) or m.group(2)
+    return value.rstrip(".,;:!?") if value else None
 
 
 def extract_domain_scheme(normalized_url: str) -> tuple[str | None, str | None]:

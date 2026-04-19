@@ -46,4 +46,6 @@ jobs:
                cd /opt/vt-clickfix-vmray
                curl -sf --retry 5 --retry-delay 3 http://localhost:8001/health
                docker compose exec -T app test -f alembic.ini
-               curl -sf -X POST http://localhost:8001/internal/vt/poll'
+               curl -sf -X POST http://localhost:8001/internal/vt/poll
+               curl -sf -X POST http://localhost:8001/internal/vmray/poll
+               echo "=== stats/summary ===" && curl -s http://localhost:8001/stats/summary'

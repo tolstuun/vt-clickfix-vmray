@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -19,6 +19,9 @@ class VMRaySubmission(Base):
     submission_id: Mapped[str | None] = mapped_column(String, nullable=True)
     verdict: Mapped[str | None] = mapped_column(String(50), nullable=True)
     score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    severity: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    submission_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    report_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_response: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     submitted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

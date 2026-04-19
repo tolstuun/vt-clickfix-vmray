@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from app.api.health import router as health_router
 from app.api.internal import router as internal_router
 from app.api.stats import router as stats_router
+from app.api.ui import router as ui_router
 from app.api.urls import router as urls_router
 from app.config import settings
 from app.db.session import make_engine
@@ -41,4 +42,5 @@ app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.include_router(health_router)
 app.include_router(internal_router)
 app.include_router(stats_router)
+app.include_router(ui_router)
 app.include_router(urls_router)

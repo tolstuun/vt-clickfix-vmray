@@ -1,11 +1,15 @@
-# Architecture — Iteration 3: Pipeline Foundation
+# Architecture — Iteration 4: Dashboard & Results
 
 ## Overview
 
-FastAPI service with async Postgres connectivity, full ingestion-and-analysis pipeline foundation:
-VirusTotal comment polling → defanged URL extraction/normalization → VMRay submission/polling.
-Background jobs are APScheduler-based and only start when `PIPELINE_AUTOSTART=true`; the app deploys
-and stays healthy without any VT/VMRay credentials configured.
+FastAPI service with async Postgres connectivity, full ingestion-and-analysis pipeline, enriched
+read APIs, and a built-in server-rendered HTML UI for analyst review.
+
+Pipeline: VirusTotal comment polling → defanged URL extraction/normalization → VMRay
+submission/polling → enriched verdict storage → dashboard & per-URL detail views.
+
+Background jobs (APScheduler) only start when `PIPELINE_AUTOSTART=true`; the app deploys and
+stays healthy without any VT/VMRay credentials configured.
 
 ## Component diagram
 
@@ -25,7 +29,7 @@ and stays healthy without any VT/VMRay credentials configured.
        ┌─────────┴──────────┐
        │                    │
   VirusTotal API        VMRay API
-  (v3/comments)         (v2/sample/url)
+  (v3/comments)         (rest/sample, rest/submission)
 ```
 
 ## CI/CD flow
@@ -49,8 +53,8 @@ Developer pushes branch
 │  1. SSH to 77.42.72.36:22 as deploy                  │
 │  2. git clone (first run) or git fetch+reset         │
 │  3. docker compose up -d --build                     │
-│  4. curl localhost:8001/health via SSH               │
-│     → fails workflow if unhealthy                    │
+│  4. health check via SSH: /health, alembic.ini       │
+│     presence, POST /internal/vt/poll                 │
 └──────────────────────────────────────────────────────┘
          │
          ▼
@@ -68,13 +72,60 @@ Developer pushes branch
 
 ### Read APIs
 
-| Method | Path              | Description                                 |
-|--------|-------------------|---------------------------------------------|
-| GET    | /stats/summary    | Aggregate counts (comments, URLs, verdicts) |
-| GET    | /urls             | Paginated URL list (`?page=1&page_size=20`) |
-| GET    | /urls/{id}        | Single URL with VMRay submission detail     |
+| Method | Path              | Description                                          |
+|--------|-------------------|------------------------------------------------------|
+| GET    | /stats/summary    | Dashboard-ready aggregate (see fields below)         |
+| GET    | /urls             | Paginated URL list with filters                      |
+| GET    | /urls/{id}        | Enriched URL detail with source comment + VMRay data |
 
-### Internal trigger endpoints (manual pipeline invocation)
+#### GET /stats/summary fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| total_comments | int | VT comments ingested |
+| total_urls | int | Unique normalized URLs |
+| total_unique_normalized_urls | int | Same as total_urls (deduplicated on insert) |
+| url_statuses | object | Counts per status: pending/submitted/analyzing/done/failed |
+| total_submissions | int | VMRay submissions created |
+| completed_submissions | int | Submissions with a final verdict |
+| verdict_counts | object | malicious/suspicious/clean/unknown |
+| top_domains | list[{domain, count}] | Top 10 domains by URL count |
+| latest_comment_at | datetime\|null | Timestamp of last ingested comment |
+| latest_url_at | datetime\|null | Timestamp of last extracted URL |
+| latest_submission_at | datetime\|null | Timestamp of last VMRay submission |
+
+#### GET /urls query parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| page | int (default 1) | Page number |
+| page_size | int (default 20, max 100) | Items per page |
+| status | string | Filter by URL status (pending/submitted/analyzing/done/failed) |
+| verdict | string | Filter by VMRay verdict (malicious/suspicious/clean) |
+| domain | string | Exact domain match |
+| q | string | Substring search on normalized_url (case-insensitive) |
+| sort | newest\|oldest\|updated | Sort order (default: newest) |
+
+#### GET /urls/{id} response fields (URLDetailOut)
+
+| Field | Description |
+|-------|-------------|
+| id, normalized_url, original_defanged | URL identifiers |
+| domain, scheme | Parsed from normalized URL |
+| status | Pipeline state |
+| created_at, updated_at | Timestamps |
+| source_comment.comment_id | VT comment ID |
+| source_comment.content | Full comment text |
+| source_comment.published_at | Comment timestamp |
+| submission.submission_id | VMRay submission integer ID |
+| submission.verdict | malicious/suspicious/clean/null |
+| submission.score | VMRay score integer |
+| submission.severity | VMRay severity string |
+| submission.submission_status | VMRay status string (e.g. inwork/finished) |
+| submission.report_url | submission_webif_url — direct link to VMRay report |
+| submission.submitted_at, completed_at | Submission timestamps |
+
+### Internal trigger endpoints
 
 | Method | Path                  | Description                                   |
 |--------|-----------------------|-----------------------------------------------|
@@ -83,21 +134,55 @@ Developer pushes branch
 | POST   | /internal/vmray/submit| Submit pending URLs to VMRay                 |
 | POST   | /internal/vmray/poll  | Poll in-flight VMRay submissions for verdicts |
 
-All internal endpoints return `{"status":"disabled"}` when the relevant credentials are absent.
+All internal endpoints return `{"status":"disabled"}` when credentials are absent.
+
+### UI pages (HTML)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /dashboard | Summary counts, verdict stats, top domains, activity timestamps |
+| GET | /urls/view | Paginated URL list with filter form (status/verdict/domain/search/sort) |
+| GET | /urls/view/{id} | Full URL detail: source comment, VMRay verdict/score/severity/report |
+
+## VMRay enrichment fields (iteration 4 additions)
+
+Fields added to `vmray_submissions` table based on Cloud API Reference v2026.2.1 `Submission` schema:
+
+| DB Column | API Field | Description |
+|-----------|-----------|-------------|
+| report_url | submission_webif_url | Direct link to VMRay web interface report |
+| severity | submission_severity | Severity classification string |
+| submission_status | submission_status | Current submission status (inwork/finished/etc.) |
+
+Both submit and poll pipelines capture these fields when present in the API response.
+
+## Screenshot support
+
+VMRay API v2026.2.1 supports screenshot retrieval via analysis archives:
+`GET /rest/analysis/<analysis_id>/archive?filename=screenshots`
+
+**Intentionally not implemented** in this iteration because:
+1. Screenshots require traversing submission → analysis (separate API call to resolve analysis_id)
+2. Archive download returns a binary ZIP file — not a direct URL reference
+3. Serving screenshots would require a binary proxy endpoint or external storage
+4. No `screenshot_url` field exists anywhere in the Submission or Analysis schemas
+
+This can be added in a future iteration by calling `GET /rest/analysis/submission/<submission_id>`
+to resolve `analysis_id`, then constructing download links.
 
 ## Pipeline state machine
 
 ```
 VTComment (stored)
-      │ URLProcessPipeline
+      │ URLProcessPipeline  → stores domain, scheme
       ▼
 URL.status = pending
-      │ VMRaySubmitPipeline
+      │ VMRaySubmitPipeline → creates VMRaySubmission with report_url, severity, submission_status
       ▼
-URL.status = submitted ── VMRaySubmission created
-      │ VMRayPollPipeline
+URL.status = submitted
+      │ VMRayPollPipeline   → updates verdict, score, severity, submission_status, report_url
       ▼
-URL.status = done  (verdict + score stored in VMRaySubmission)
+URL.status = done  (completed_at set, verdict/score/report_url stored)
      or
 URL.status = failed
 ```
@@ -108,48 +193,47 @@ URL.status = failed
 app/
   main.py          # FastAPI app + async lifespan (engine, httpx, clients, scheduler)
   config.py        # pydantic-settings (all env vars with safe defaults)
-  deps.py          # FastAPI dependency functions (get_session, get_vt_client, get_vmray_client)
+  deps.py          # FastAPI dependency functions
   api/
-    health.py      # GET /health — async, checks DB with SELECT 1
+    health.py      # GET /health
     internal.py    # POST /internal/* — pipeline trigger endpoints
-    stats.py       # GET /stats/summary
-    urls.py        # GET /urls, GET /urls/{id}
+    stats.py       # GET /stats/summary — dashboard-ready aggregation
+    urls.py        # GET /urls (filtered/sorted/paginated), GET /urls/{id} (enriched detail)
+    ui.py          # GET /dashboard, GET /urls/view, GET /urls/view/{id} — HTML pages
   db/
     base.py        # SQLAlchemy DeclarativeBase
     session.py     # make_engine(url) → AsyncEngine
   models/
-    __init__.py    # imports all models (needed by Alembic autogenerate)
-    vt_comment.py  # VTComment ORM model
-    url.py         # URL ORM model (url_hash dedup, status state machine)
-    vmray_submission.py  # VMRaySubmission ORM model
+    __init__.py
+    vt_comment.py  # VTComment: comment_id, content, published_at, raw_response
+    url.py         # URL: url_hash, normalized_url, domain, scheme, status
+    vmray_submission.py  # VMRaySubmission: verdict, score, severity, report_url, submission_status
   schemas/
-    stats.py       # StatsSummary pydantic response model
-    url.py         # URLOut, URLListResponse pydantic response models
+    stats.py       # StatsSummary, URLStatusCounts, VerdictCounts, TopDomain
+    url.py         # URLOut, URLDetailOut, VMRaySubmissionOut, VTCommentRef, URLListResponse
   services/
-    url_extractor.py   # extract_urls(), url_hash() — pure functions, no I/O
-    vt_client.py       # VTClient (httpx-based, is_configured guard)
-    vmray_client.py    # VMRayClient (httpx-based, is_configured guard)
+    url_extractor.py   # extract_urls(), extract_domain_scheme(), url_hash()
+    vt_client.py       # VTClient
+    vmray_client.py    # VMRayClient
     pipeline.py        # VTPipeline, URLProcessPipeline, VMRaySubmitPipeline, VMRayPollPipeline
   workers/
-    scheduler.py   # APScheduler setup; jobs attached only when pipeline_autostart=True
+    scheduler.py   # APScheduler setup
+  templates/
+    dashboard.html     # /dashboard — stats + top domains
+    urls_list.html     # /urls/view — paginated list with filters
+    url_detail.html    # /urls/view/{id} — analyst detail view
 alembic/
-  env.py           # reads DATABASE_URL env var, strips +asyncpg for sync
   versions/
-    0001_initial.py  # baseline (empty)
-    0002_add_pipeline_tables.py  # vt_comments, urls, vmray_submissions
-alembic.ini        # script location, fallback sync URL
+    0001_initial.py
+    0002_add_pipeline_tables.py
+    0003_add_enrichment_columns.py  # domain, scheme, report_url, severity, submission_status
 tests/
-  conftest.py      # pg_container, db_urls, db_engine, db_session, db_client, no_db_client
-  test_health.py   # health endpoint smoke tests
-  test_url_extractor.py  # 15 unit tests for url_extractor (pure, no DB)
-  test_pipeline.py       # 9 async pipeline tests with mocked VT/VMRay clients
-  test_api.py            # 10 API endpoint tests via TestClient
+  conftest.py
+  test_url_extractor.py
+  test_pipeline.py      # includes domain/scheme extraction and VMRay enrichment field tests
+  test_api.py           # includes filter/sort, detail shape, UI page tests
 docs/
-  architecture.md  # this file
-pytest.ini         # asyncio_mode=auto, session-scoped event loop
-.github/workflows/
-  ci.yml           # pytest on all branches
-  deploy.yml       # SSH deploy on push to main
+  architecture.md
 ```
 
 ## Configuration
@@ -168,18 +252,6 @@ pytest.ini         # asyncio_mode=auto, session-scoped event loop
 | VMRAY_ENABLED               | false                                        | Enable VMRay scheduler jobs          |
 | PIPELINE_AUTOSTART          | false                                        | Start scheduler on app startup       |
 
-Alembic derives its sync URL from `DATABASE_URL` by stripping `+asyncpg`.
-
-## GitHub Actions secrets (deploy)
-
-| Secret           | Description                               |
-|------------------|-------------------------------------------|
-| DEPLOY_HOST      | Server public IP (77.42.72.36)            |
-| DEPLOY_PORT      | SSH port (22)                             |
-| DEPLOY_USER      | Linux username on server (deploy)         |
-| DEPLOY_KEY       | Ed25519 private key (PEM)                 |
-| DEPLOY_HOST_KEY  | Server ed25519 host key (known_hosts)     |
-
 ## Exact API contracts
 
 ### VirusTotal (source: https://docs.virustotal.com/reference/overview)
@@ -188,47 +260,22 @@ Alembic derives its sync URL from `DATABASE_URL` by stripping `+asyncpg`.
 |----------|-------|
 | Endpoint | `GET https://www.virustotal.com/api/v3/comments` |
 | Auth | `x-apikey: <key>` header |
-| Parameters | `limit` (int, default 10), `filter` (string), `cursor` (string) |
-| Filter | `filter=tag:clickfix` — TAG-BASED, not full-text search. Returns only comments explicitly tagged "clickfix" by VT users. Comments mentioning "clickfix" in body text but without the tag are excluded. |
-| Pagination | `meta.cursor` in response → pass as `cursor=` param |
-| Comment fields | `attributes.text` (string), `attributes.date` (Unix timestamp int), `attributes.tags` (string[]), `attributes.votes` ({positive, negative, abuse}), `attributes.html` (string). No `author` field in documented API. |
+| Parameters | `limit` (int), `filter` (string), `cursor` (string) |
+| Filter | `filter=tag:clickfix` — TAG-BASED. Returns only comments explicitly tagged "clickfix". |
+| Pagination | `meta.cursor` in response |
+| Comment fields | `attributes.text`, `attributes.date` (Unix timestamp), `attributes.tags`, `attributes.votes`, `attributes.html`. No `author` field. |
 
 ### VMRay (source: .local_docs/vmray — Cloud API Reference v2026.2.1)
 
 **Submit URL** — `POST /rest/sample/submit`
 - Auth: `Authorization: api_key <key>` header
 - Body: multipart form, field `sample_url=<url>`
-- Response schema `SampleSubmit`:
-  ```
-  { "result": "ok",
-    "data": {          ← SubmisssionResult
-      "errors": [...],
-      "submissions": [{ "submission_id": <int>, "submission_finished": false, ... }],
-      ...
-    } }
-  ```
-- Submission ID extraction: `response["data"]["submissions"][0]["submission_id"]` (integer)
+- Response: `SampleSubmit → SubmisssionResult → submissions[0]` (Submission object)
+- Fields used: `submission_id` (int), `submission_webif_url` (str), `submission_severity`, `submission_status`
 
 **Get Submission** — `GET /rest/submission/<submission_id>`
 - Auth: `Authorization: api_key <key>` header
-- Response schema `SubmissionItem`:
-  ```
-  { "result": "ok",
-    "data": {          ← Submission object
-      "submission_id": <int>,
-      "submission_finished": <bool>,          ← completion indicator
-      "submission_verdict": <"malicious"|"suspicious"|"clean"|null>,
-      "submission_score": <int|null>,
-      ...
-    } }
-  ```
-- Completion: `submission_finished == true`
-- Verdict values: `"malicious"`, `"suspicious"`, `"clean"`, or `null` (not yet determined)
-
-## What is NOT in this iteration
-
-- Dashboard UI
-- Authentication / authorization on internal endpoints
-- Pagination cursor for VT comment polling
-- ORM relationships (lazy loading) — queries use explicit joins/subqueries
-- Local text filtering for VT comments (current approach relies on tag filter only)
+- Response: `SubmissionItem → data` (Submission object)
+- Fields used: `submission_finished` (bool), `submission_verdict` (VerdictTypeEnum|null),
+  `submission_score` (int|null), `submission_severity` (SeverityTypeEnum|null),
+  `submission_status` (SubmissionStatusEnum), `submission_webif_url` (str)

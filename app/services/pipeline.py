@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.url import URL
 from app.models.vmray_submission import VMRaySubmission
 from app.models.vt_comment import VTComment
-from app.services.url_extractor import extract_urls, url_hash
+from app.services.url_extractor import extract_domain_scheme, extract_urls, url_hash
 from app.services.vt_client import VTClient
 from app.services.vmray_client import VMRayClient
 
@@ -66,6 +66,7 @@ class URLProcessPipeline:
                 )
                 if existing:
                     continue
+                domain, scheme = extract_domain_scheme(normalized)
                 self._session.add(
                     URL(
                         id=uuid.uuid4(),
@@ -73,6 +74,8 @@ class URLProcessPipeline:
                         original_defanged=original,
                         normalized_url=normalized,
                         vt_comment_id=comment.id,
+                        domain=domain,
+                        scheme=scheme,
                         status="pending",
                     )
                 )
@@ -105,14 +108,28 @@ class VMRaySubmitPipeline:
                 url.status = "failed"
                 continue
 
-            # SampleSubmit response: data.submissions[0].submission_id (int)
+            # SampleSubmit → SubmisssionResult → submissions[0] (Submission object)
             subs = raw.get("data", {}).get("submissions", [])
-            submission_id = str(subs[0]["submission_id"]) if subs else None
+            if subs:
+                sub_data = subs[0]
+                submission_id = str(sub_data["submission_id"])
+                report_url = sub_data.get("submission_webif_url")
+                severity = sub_data.get("submission_severity")
+                submission_status = sub_data.get("submission_status")
+            else:
+                submission_id = None
+                report_url = None
+                severity = None
+                submission_status = None
+
             self._session.add(
                 VMRaySubmission(
                     id=uuid.uuid4(),
                     url_id=url.id,
-                    submission_id=submission_id or None,
+                    submission_id=submission_id,
+                    report_url=report_url,
+                    severity=severity,
+                    submission_status=submission_status,
                     raw_response=raw,
                 )
             )
@@ -149,15 +166,25 @@ class VMRayPollPipeline:
                 continue
 
             polled += 1
-            # SubmissionItem response: data is a single Submission object
+            # SubmissionItem → data is a Submission object
             data = raw.get("data", {})
-            verdict = data.get("submission_verdict")      # VerdictTypeEnum | null
-            score = data.get("submission_score")          # int | null
-            finished = data.get("submission_finished", False)  # bool
+            verdict = data.get("submission_verdict")
+            score = data.get("submission_score")
+            finished = data.get("submission_finished", False)
+            severity = data.get("submission_severity")
+            submission_status = data.get("submission_status")
+            report_url = data.get("submission_webif_url")
 
             sub.verdict = verdict
             sub.score = score
             sub.raw_response = raw
+            if severity is not None:
+                sub.severity = severity
+            if submission_status is not None:
+                sub.submission_status = submission_status
+            if report_url:
+                sub.report_url = report_url
+
             if finished:
                 sub.completed_at = datetime.now(tz=timezone.utc)
                 url = await self._session.get(URL, sub.url_id)

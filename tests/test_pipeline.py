@@ -75,6 +75,9 @@ def _vmray_submit_response(submission_id: int = 98765) -> dict:
                     "submission_verdict": None,
                     "submission_score": None,
                     "submission_filename": "https://example.com/",
+                    "submission_webif_url": f"https://cloud.vmray.com/user/sample/view?id={submission_id}",
+                    "submission_status": "inwork",
+                    "submission_severity": None,
                 }
             ],
         },
@@ -100,6 +103,8 @@ def _vmray_poll_response(
             "submission_sample_verdict": verdict,
             "submission_filename": "https://example.com/",
             "submission_status": "inwork" if not finished else "finished",
+            "submission_severity": "malicious" if verdict == "malicious" else None,
+            "submission_webif_url": f"https://cloud.vmray.com/user/sample/view?id={submission_id}",
         },
         "continuation_id": None,
         "truncated": False,
@@ -349,3 +354,128 @@ async def test_vmray_poll_pipeline_not_finished_yet(db_session, mock_vmray_clien
     assert url_obj.status == "submitted"  # unchanged
     await db_session.refresh(sub)
     assert sub.completed_at is None
+
+
+# ---------------------------------------------------------------------------
+# Domain/scheme extraction tests
+# ---------------------------------------------------------------------------
+
+async def test_url_process_pipeline_extracts_domain_scheme(db_session, mock_vt_client):
+    cid = f"u-{uuid.uuid4().hex}-dom"
+    comments, _ = _vt_comments_page(cid, "hxxps://evil[.]domain/malware/stage2.exe")
+    mock_vt_client.get_comments = AsyncMock(return_value=(comments, None))
+    await VTPipeline(db_session, mock_vt_client).run()
+
+    await URLProcessPipeline(db_session).run()
+
+    url = await db_session.scalar(
+        select(URL).where(URL.normalized_url == "https://evil.domain/malware/stage2.exe")
+    )
+    assert url is not None
+    assert url.domain == "evil.domain"
+    assert url.scheme == "https"
+
+
+async def test_url_process_pipeline_http_scheme(db_session, mock_vt_client):
+    cid = f"u-{uuid.uuid4().hex}-http"
+    comments, _ = _vt_comments_page(cid, "hxxp://bad[.]host/path")
+    mock_vt_client.get_comments = AsyncMock(return_value=(comments, None))
+    await VTPipeline(db_session, mock_vt_client).run()
+    await URLProcessPipeline(db_session).run()
+
+    url = await db_session.scalar(
+        select(URL).where(URL.normalized_url == "http://bad.host/path")
+    )
+    assert url is not None
+    assert url.domain == "bad.host"
+    assert url.scheme == "http"
+
+
+# ---------------------------------------------------------------------------
+# VMRay enrichment field tests
+# ---------------------------------------------------------------------------
+
+async def test_vmray_submit_stores_report_url(db_session, mock_vmray_client):
+    url_obj = URL(
+        id=uuid.uuid4(),
+        url_hash=f"hash-{uuid.uuid4().hex}",
+        original_defanged="hxxp://reporturl[.]test/x",
+        normalized_url="http://reporturl.test/x",
+        status="pending",
+    )
+    db_session.add(url_obj)
+    await db_session.commit()
+
+    await VMRaySubmitPipeline(db_session, mock_vmray_client).run()
+
+    sub = await db_session.scalar(
+        select(VMRaySubmission).where(VMRaySubmission.url_id == url_obj.id)
+    )
+    assert sub is not None
+    assert sub.report_url is not None
+    assert "vmray" in sub.report_url
+
+
+async def test_vmray_poll_stores_severity_and_status(db_session, mock_vmray_client):
+    url_obj = URL(
+        id=uuid.uuid4(),
+        url_hash=f"hash-{uuid.uuid4().hex}",
+        original_defanged="hxxp://severity[.]test/x",
+        normalized_url="http://severity.test/x",
+        status="submitted",
+    )
+    db_session.add(url_obj)
+    await db_session.flush()
+
+    sub = VMRaySubmission(
+        id=uuid.uuid4(),
+        url_id=url_obj.id,
+        submission_id="98765",
+    )
+    db_session.add(sub)
+    await db_session.commit()
+
+    mock_vmray_client.get_submission = AsyncMock(
+        return_value=_vmray_poll_response(
+            submission_id=98765, finished=True, verdict="malicious", score=100
+        )
+    )
+
+    await VMRayPollPipeline(db_session, mock_vmray_client).run()
+
+    await db_session.refresh(sub)
+    assert sub.severity == "malicious"
+    assert sub.submission_status == "finished"
+    assert sub.report_url is not None
+
+
+async def test_vmray_poll_stores_report_url(db_session, mock_vmray_client):
+    url_obj = URL(
+        id=uuid.uuid4(),
+        url_hash=f"hash-{uuid.uuid4().hex}",
+        original_defanged="hxxp://pollreport[.]test/x",
+        normalized_url="http://pollreport.test/x",
+        status="submitted",
+    )
+    db_session.add(url_obj)
+    await db_session.flush()
+
+    sub = VMRaySubmission(
+        id=uuid.uuid4(),
+        url_id=url_obj.id,
+        submission_id="77777",
+    )
+    db_session.add(sub)
+    await db_session.commit()
+
+    mock_vmray_client.get_submission = AsyncMock(
+        return_value=_vmray_poll_response(
+            submission_id=77777, finished=False, verdict=None, score=None
+        )
+    )
+
+    await VMRayPollPipeline(db_session, mock_vmray_client).run()
+
+    await db_session.refresh(sub)
+    assert sub.report_url is not None
+    assert "77777" in sub.report_url

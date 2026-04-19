@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>URL Detail — VT ClickFix → VMRay</title>
+<style>
+body { font-family: monospace; margin: 2rem; background: #1a1a1a; color: #e0e0e0; }
+h1 { color: #aaa; font-size: 1.1rem; margin-bottom: 1.5rem; word-break: break-all; }
+h2 { color: #888; font-size: 0.95rem; margin: 1.5rem 0 0.5rem; border-bottom: 1px solid #333; padding-bottom: 0.3rem; }
+a { color: #5b9bd5; text-decoration: none; }
+a:hover { text-decoration: underline; }
+table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
+th, td { text-align: left; padding: 0.4rem 0.8rem; border-bottom: 1px solid #2a2a2a; font-size: 0.82rem; vertical-align: top; }
+th { color: #666; font-weight: normal; width: 200px; }
+.badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 2px; font-size: 0.75rem; }
+.malicious { background: #5a1a1a; color: #e05555; }
+.suspicious { background: #4a3a10; color: #e0a050; }
+.clean { background: #1a3a1a; color: #55aa55; }
+.unknown, .pending, .submitted, .analyzing, .done, .failed { background: #2a2a2a; color: #888; }
+.done { color: #55aa55; }
+.failed { color: #e05555; }
+pre { background: #252525; border: 1px solid #333; padding: 0.8rem; overflow-x: auto; font-size: 0.78rem; white-space: pre-wrap; word-break: break-all; }
+nav { margin-bottom: 1.5rem; font-size: 0.85rem; }
+nav a { margin-right: 1rem; }
+</style>
+</head>
+<body>
+<nav>
+  <a href="/dashboard">Dashboard</a>
+  <a href="/urls/view">URLs</a>
+</nav>
+
+<h1>{{ url.normalized_url }}</h1>
+
+<h2>URL</h2>
+<table>
+  <tr><th>ID</th><td>{{ url.id }}</td></tr>
+  <tr><th>Normalized URL</th><td>{{ url.normalized_url }}</td></tr>
+  <tr><th>Original (defanged)</th><td>{{ url.original_defanged }}</td></tr>
+  <tr><th>Domain</th><td>{{ url.domain or "—" }}</td></tr>
+  <tr><th>Scheme</th><td>{{ url.scheme or "—" }}</td></tr>
+  <tr><th>Status</th><td><span class="badge {{ url.status }}">{{ url.status }}</span></td></tr>
+  <tr><th>Created</th><td>{{ url.created_at }}</td></tr>
+  <tr><th>Updated</th><td>{{ url.updated_at }}</td></tr>
+</table>
+
+{% if url.source_comment %}
+<h2>Source Comment</h2>
+<table>
+  <tr><th>Comment ID</th><td>{{ url.source_comment.comment_id }}</td></tr>
+  <tr><th>Published</th><td>{{ url.source_comment.published_at or "—" }}</td></tr>
+  <tr><th>Text</th><td><pre>{{ url.source_comment.content }}</pre></td></tr>
+</table>
+{% endif %}
+
+{% if url.submission %}
+<h2>VMRay Analysis</h2>
+<table>
+  <tr><th>Submission ID</th><td>{{ url.submission.submission_id or "—" }}</td></tr>
+  <tr><th>Status</th><td>{{ url.submission.submission_status or "—" }}</td></tr>
+  <tr><th>Verdict</th><td>
+    {% if url.submission.verdict %}
+    <span class="badge {{ url.submission.verdict }}">{{ url.submission.verdict }}</span>
+    {% else %}—{% endif %}
+  </td></tr>
+  <tr><th>Score</th><td>{{ url.submission.score if url.submission.score is not none else "—" }}</td></tr>
+  <tr><th>Severity</th><td>{{ url.submission.severity or "—" }}</td></tr>
+  <tr><th>Submitted</th><td>{{ url.submission.submitted_at }}</td></tr>
+  <tr><th>Completed</th><td>{{ url.submission.completed_at or "—" }}</td></tr>
+  <tr><th>Report</th><td>
+    {% if url.submission.report_url %}
+    <a href="{{ url.submission.report_url }}" target="_blank">Open in VMRay ↗</a>
+    {% else %}—{% endif %}
+  </td></tr>
+</table>
+{% else %}
+<h2>VMRay Analysis</h2>
+<p style="color:#555">No submission yet.</p>
+{% endif %}
+</body>
+</html>

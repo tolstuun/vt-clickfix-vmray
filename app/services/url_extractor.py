@@ -3,7 +3,6 @@ import re
 from urllib.parse import urlparse, urlunparse
 
 _DEFANGED_RE = re.compile(r"hxxps?://[^\s<>\"')]+", re.IGNORECASE)
-_BRACKET_DOT_RE = re.compile(r"\[\.|\.|\]|\[dot\]", re.IGNORECASE)
 
 
 def _refang(url: str) -> str:
@@ -29,6 +28,17 @@ def _normalize(url: str) -> str:
 
 def url_hash(normalized: str) -> str:
     return hashlib.sha256(normalized.encode()).hexdigest()
+
+
+def extract_domain_scheme(normalized_url: str) -> tuple[str | None, str | None]:
+    """Return (domain, scheme) from a normalized URL, or (None, None) on parse failure."""
+    try:
+        parsed = urlparse(normalized_url)
+        domain = parsed.hostname or None
+        scheme = parsed.scheme or None
+        return domain, scheme
+    except Exception:
+        return None, None
 
 
 def extract_urls(text: str) -> list[tuple[str, str]]:

@@ -110,26 +110,22 @@ class VMRaySubmitPipeline:
 
             # SampleSubmit → SubmisssionResult → submissions[0] (Submission object)
             subs = raw.get("data", {}).get("submissions", [])
-            if subs:
-                sub_data = subs[0]
-                submission_id = str(sub_data["submission_id"])
-                report_url = sub_data.get("submission_webif_url")
-                severity = sub_data.get("submission_severity")
-                submission_status = sub_data.get("submission_status")
-            else:
-                submission_id = None
-                report_url = None
-                severity = None
-                submission_status = None
+            if not subs:
+                continue
+
+            sub_data = subs[0]
+            submission_id = sub_data.get("submission_id")
+            if submission_id is None:
+                continue
 
             self._session.add(
                 VMRaySubmission(
                     id=uuid.uuid4(),
                     url_id=url.id,
-                    submission_id=submission_id,
-                    report_url=report_url,
-                    severity=severity,
-                    submission_status=submission_status,
+                    submission_id=str(submission_id),
+                    report_url=sub_data.get("submission_webif_url"),
+                    severity=sub_data.get("submission_severity"),
+                    submission_status=sub_data.get("submission_status"),
                     raw_response=raw,
                 )
             )

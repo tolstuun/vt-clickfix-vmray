@@ -111,3 +111,20 @@ def test_parse_source_no_phrase_returns_none():
 
 def test_parse_source_empty_text():
     assert parse_source_from_comment("") is None
+
+
+def test_parse_source_plain_no_quotes():
+    assert parse_source_from_comment("IOC found on ThreatFox") == "ThreatFox"
+
+
+def test_parse_source_plain_newline_terminated():
+    assert parse_source_from_comment("IOC found on ThreatFox\nmore text") == "ThreatFox"
+
+
+def test_parse_source_plain_trailing_punctuation_stripped():
+    assert parse_source_from_comment("IOC found on ThreatFox,") == "ThreatFox"
+
+
+def test_parse_source_plain_embedded_in_multiline():
+    text = "clickfix payload\nIOC found on URLhaus\nhxxp://evil[.]com/x"
+    assert parse_source_from_comment(text) == "URLhaus"

@@ -254,6 +254,60 @@ async def test_vmray_submit_pipeline_submits_pending(db_session, mock_vmray_clie
     assert sub.submission_id == "98765"
 
 
+async def test_vmray_submit_no_submission_id_leaves_url_pending(db_session):
+    """When VMRay returns no submissions array, URL stays pending; no VMRaySubmission created."""
+    client = MagicMock()
+    client.is_configured = True
+    client.submit_url = AsyncMock(return_value={"result": "ok", "data": {"submissions": []}})
+
+    url_obj = URL(
+        id=uuid.uuid4(),
+        url_hash=f"hash-{uuid.uuid4().hex}",
+        original_defanged="hxxp://nosub[.]test/x",
+        normalized_url="http://nosub.test/x",
+        status="pending",
+    )
+    db_session.add(url_obj)
+    await db_session.commit()
+
+    result = await VMRaySubmitPipeline(db_session, client).run()
+    assert result["submitted"] == 0
+
+    await db_session.refresh(url_obj)
+    assert url_obj.status == "pending"
+
+    sub = await db_session.scalar(
+        select(VMRaySubmission).where(VMRaySubmission.url_id == url_obj.id)
+    )
+    assert sub is None
+
+
+async def test_vmray_submit_null_submission_id_in_response_leaves_url_pending(db_session):
+    """When VMRay returns submission_id=null, URL stays pending; no VMRaySubmission created."""
+    client = MagicMock()
+    client.is_configured = True
+    client.submit_url = AsyncMock(return_value={
+        "result": "ok",
+        "data": {"submissions": [{"submission_id": None, "submission_status": "inwork"}]},
+    })
+
+    url_obj = URL(
+        id=uuid.uuid4(),
+        url_hash=f"hash-{uuid.uuid4().hex}",
+        original_defanged="hxxp://nullsub[.]test/x",
+        normalized_url="http://nullsub.test/x",
+        status="pending",
+    )
+    db_session.add(url_obj)
+    await db_session.commit()
+
+    result = await VMRaySubmitPipeline(db_session, client).run()
+    assert result["submitted"] == 0
+
+    await db_session.refresh(url_obj)
+    assert url_obj.status == "pending"
+
+
 async def test_vmray_submit_stores_full_raw_response(db_session, mock_vmray_client):
     url_obj = URL(
         id=uuid.uuid4(),

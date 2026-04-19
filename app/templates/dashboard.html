@@ -140,6 +140,7 @@ nav a { margin-right: 1rem; }
     <th>Domain</th>
     <th>Source</th>
     <th>Status</th>
+    <th>VMRay</th>
     <th>Verdict</th>
     <th>Report</th>
     <th>Created</th>
@@ -150,6 +151,7 @@ nav a { margin-right: 1rem; }
     <td>{{ url.domain or "—" }}</td>
     <td style="color:#666;font-size:0.78rem">{{ url.source or "—" }}</td>
     <td><span class="badge {{ url.status }}">{{ url.status }}</span></td>
+    <td style="color:#666;font-size:0.78rem">{{ url.vmray_status or "—" }}</td>
     <td>
       {% if url.verdict %}
       <span class="badge {{ url.verdict }}">{{ url.verdict }}</span>
@@ -163,7 +165,7 @@ nav a { margin-right: 1rem; }
     <td>{{ url.created_at.strftime('%Y-%m-%d %H:%M') if url.created_at else "—" }}</td>
   </tr>
   {% else %}
-  <tr><td colspan="7" style="color:#555;text-align:center;padding:2rem">No URLs yet.</td></tr>
+  <tr><td colspan="8" style="color:#555;text-align:center;padding:2rem">No URLs yet.</td></tr>
   {% endfor %}
 </table>
 <div class="pager">

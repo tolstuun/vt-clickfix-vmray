@@ -10,6 +10,7 @@ from app.models.url import URL
 from app.models.vmray_submission import VMRaySubmission
 from app.models.vt_comment import VTComment
 from app.schemas.url import URLDetailOut, URLListResponse, URLOut, VMRaySubmissionOut, VTCommentRef
+from app.services.url_extractor import parse_source_from_comment
 
 router = APIRouter(prefix="/urls")
 
@@ -23,8 +24,9 @@ def _build_submission_out(sub: VMRaySubmission | None) -> VMRaySubmissionOut | N
 def _source_label(comment: VTComment | None) -> str | None:
     if comment is None:
         return None
-    if comment.author:
-        return comment.author
+    parsed = parse_source_from_comment(comment.content)
+    if parsed:
+        return parsed
     return comment.comment_id
 
 
@@ -43,6 +45,7 @@ def _url_to_out(url: URL, sub: VMRaySubmission | None, source: str | None) -> UR
         status=url.status,
         source=source,
         verdict=sub.verdict if sub else None,
+        vmray_status=sub.submission_status if sub else None,
         report_url=sub.report_url if sub else None,
         created_at=url.created_at,
         updated_at=url.updated_at,

@@ -24,6 +24,7 @@ class URLOut(BaseModel):
     status: str
     source: str | None = None
     verdict: str | None = None
+    vmray_status: str | None = None
     report_url: str | None = None
     created_at: datetime
     updated_at: datetime

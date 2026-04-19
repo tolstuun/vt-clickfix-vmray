@@ -20,7 +20,7 @@ stays healthy without any VT/VMRay credentials configured.
 │  ┌───────────────────────────┐   ┌────────────────────────────┐  │
 │  │           app             │   │            db              │  │
 │  │  FastAPI / uvicorn        │──▶│    PostgreSQL 16           │  │
-│  │  :8000 (host:8001)        │   │    :5432                   │  │
+│  │  :8000 (host:80)          │   │    :5432                   │  │
 │  │  APScheduler (optional)   │   │                            │  │
 │  └─────────────┬─────────────┘   └────────────────────────────┘  │
 │                │                                                  │

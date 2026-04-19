@@ -1,6 +1,6 @@
 import pytest
 
-from app.services.url_extractor import extract_urls, url_hash, _refang, _normalize
+from app.services.url_extractor import extract_urls, url_hash, _refang, _normalize, parse_source_from_comment
 
 
 def test_extract_basic_hxxp():
@@ -84,3 +84,30 @@ def test_normalize_lowercases_host():
 
 def test_normalize_strips_trailing_comma():
     assert _normalize("http://evil.com/x,") == "http://evil.com/x"
+
+
+# parse_source_from_comment
+
+def test_parse_source_exact_phrase():
+    assert parse_source_from_comment('IOC found on "ThreatFox"') == "ThreatFox"
+
+
+def test_parse_source_plural():
+    assert parse_source_from_comment('IOCs found on "URLhaus"') == "URLhaus"
+
+
+def test_parse_source_case_insensitive():
+    assert parse_source_from_comment('ioc found on "MalwareBazaar"') == "MalwareBazaar"
+
+
+def test_parse_source_embedded_in_text():
+    text = "Some context.\nIOC found on \"ThreatFox\"\nhxxp://evil[.]com/x"
+    assert parse_source_from_comment(text) == "ThreatFox"
+
+
+def test_parse_source_no_phrase_returns_none():
+    assert parse_source_from_comment("hxxp://evil[.]com/x no source phrase here") is None
+
+
+def test_parse_source_empty_text():
+    assert parse_source_from_comment("") is None

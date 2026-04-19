@@ -51,26 +51,28 @@ def test_list_urls_empty(db_client):
     assert body["page_size"] == 20
 
 
-def test_list_urls_item_shape(db_client, db_session):
-    """URLOut items must include source and must not include score."""
+def test_list_urls_item_shape_source_parsed(db_client, db_session):
+    """Source is parsed from comment text phrase; score must be absent; vmray_status present."""
     import asyncio
     from app.models.url import URL as URLModel
     from app.models.vt_comment import VTComment
 
+    cid = f"c-{uuid.uuid4().hex}"
+
     async def _setup():
         comment = VTComment(
             id=uuid.uuid4(),
-            comment_id=f"c-{uuid.uuid4().hex}",
-            author="analyst1",
-            content="hxxp://shape[.]test/x",
+            comment_id=cid,
+            author="",
+            content='IOC found on "ThreatFox"\nhxxp://shape[.]test/parsed',
         )
         db_session.add(comment)
         await db_session.flush()
         url = URLModel(
             id=uuid.uuid4(),
             url_hash=f"hash-{uuid.uuid4().hex}",
-            original_defanged="hxxp://shape[.]test/x",
-            normalized_url="http://shape.test/x",
+            original_defanged="hxxp://shape[.]test/parsed",
+            normalized_url="http://shape.test/parsed",
             domain="shape.test",
             scheme="http",
             vt_comment_id=comment.id,
@@ -81,14 +83,55 @@ def test_list_urls_item_shape(db_client, db_session):
 
     asyncio.get_event_loop().run_until_complete(_setup())
 
-    response = db_client.get("/urls?q=shape.test")
+    response = db_client.get("/urls?q=shape.test/parsed")
     assert response.status_code == 200
     items = response.json()["items"]
     assert len(items) >= 1
     item = items[0]
-    assert "source" in item
-    assert item["source"] == "analyst1"
+    assert item["source"] == "ThreatFox"
+    assert "vmray_status" in item
     assert "score" not in item
+
+
+def test_list_urls_item_source_fallback_to_comment_id(db_client, db_session):
+    """When no parsed source phrase, source falls back to comment_id (not author)."""
+    import asyncio
+    from app.models.url import URL as URLModel
+    from app.models.vt_comment import VTComment
+
+    cid = f"c-{uuid.uuid4().hex}"
+
+    async def _setup():
+        comment = VTComment(
+            id=uuid.uuid4(),
+            comment_id=cid,
+            author="some_author",
+            content="hxxp://shape[.]test/fallback no source phrase here",
+        )
+        db_session.add(comment)
+        await db_session.flush()
+        url = URLModel(
+            id=uuid.uuid4(),
+            url_hash=f"hash-{uuid.uuid4().hex}",
+            original_defanged="hxxp://shape[.]test/fallback",
+            normalized_url="http://shape.test/fallback",
+            domain="shape.test",
+            scheme="http",
+            vt_comment_id=comment.id,
+            status="pending",
+        )
+        db_session.add(url)
+        await db_session.commit()
+
+    asyncio.get_event_loop().run_until_complete(_setup())
+
+    response = db_client.get("/urls?q=shape.test/fallback")
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) >= 1
+    item = items[0]
+    assert item["source"] == cid
+    assert item["source"] != "some_author"
 
 
 def test_list_urls_pagination(db_client):

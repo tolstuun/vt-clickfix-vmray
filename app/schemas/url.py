@@ -8,7 +8,6 @@ class VMRaySubmissionOut(BaseModel):
     id: uuid.UUID
     submission_id: str | None
     verdict: str | None
-    score: int | None
     severity: str | None
     submission_status: str | None
     report_url: str | None
@@ -23,8 +22,8 @@ class URLOut(BaseModel):
     normalized_url: str
     domain: str | None
     status: str
+    source: str | None = None
     verdict: str | None = None
-    score: int | None = None
     report_url: str | None = None
     created_at: datetime
     updated_at: datetime

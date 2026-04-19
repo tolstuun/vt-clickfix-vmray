@@ -63,7 +63,6 @@ nav a { margin-right: 1rem; }
     <span class="badge {{ url.submission.verdict }}">{{ url.submission.verdict }}</span>
     {% else %}—{% endif %}
   </td></tr>
-  <tr><th>Score</th><td>{{ url.submission.score if url.submission.score is not none else "—" }}</td></tr>
   <tr><th>Severity</th><td>{{ url.submission.severity or "—" }}</td></tr>
   <tr><th>Submitted</th><td>{{ url.submission.submitted_at }}</td></tr>
   <tr><th>Completed</th><td>{{ url.submission.completed_at or "—" }}</td></tr>

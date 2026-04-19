@@ -20,14 +20,29 @@ def _build_submission_out(sub: VMRaySubmission | None) -> VMRaySubmissionOut | N
     return VMRaySubmissionOut.model_validate(sub)
 
 
-def _url_to_out(url: URL, sub: VMRaySubmission | None) -> URLOut:
+def _source_label(comment: VTComment | None) -> str | None:
+    if comment is None:
+        return None
+    if comment.author:
+        return comment.author
+    return comment.comment_id
+
+
+async def _load_source(session: AsyncSession, url: URL) -> str | None:
+    if not url.vt_comment_id:
+        return None
+    comment = await session.get(VTComment, url.vt_comment_id)
+    return _source_label(comment)
+
+
+def _url_to_out(url: URL, sub: VMRaySubmission | None, source: str | None) -> URLOut:
     return URLOut(
         id=url.id,
         normalized_url=url.normalized_url,
         domain=url.domain,
         status=url.status,
+        source=source,
         verdict=sub.verdict if sub else None,
-        score=sub.score if sub else None,
         report_url=sub.report_url if sub else None,
         created_at=url.created_at,
         updated_at=url.updated_at,
@@ -80,7 +95,8 @@ async def list_urls(
         sub = await session.scalar(
             select(VMRaySubmission).where(VMRaySubmission.url_id == url.id)
         )
-        items.append(_url_to_out(url, sub))
+        source = await _load_source(session, url)
+        items.append(_url_to_out(url, sub, source))
 
     return URLListResponse(items=items, total=total, page=page, page_size=page_size)
 

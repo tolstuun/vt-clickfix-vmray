@@ -51,6 +51,46 @@ def test_list_urls_empty(db_client):
     assert body["page_size"] == 20
 
 
+def test_list_urls_item_shape(db_client, db_session):
+    """URLOut items must include source and must not include score."""
+    import asyncio
+    from app.models.url import URL as URLModel
+    from app.models.vt_comment import VTComment
+
+    async def _setup():
+        comment = VTComment(
+            id=uuid.uuid4(),
+            comment_id=f"c-{uuid.uuid4().hex}",
+            author="analyst1",
+            content="hxxp://shape[.]test/x",
+        )
+        db_session.add(comment)
+        await db_session.flush()
+        url = URLModel(
+            id=uuid.uuid4(),
+            url_hash=f"hash-{uuid.uuid4().hex}",
+            original_defanged="hxxp://shape[.]test/x",
+            normalized_url="http://shape.test/x",
+            domain="shape.test",
+            scheme="http",
+            vt_comment_id=comment.id,
+            status="pending",
+        )
+        db_session.add(url)
+        await db_session.commit()
+
+    asyncio.get_event_loop().run_until_complete(_setup())
+
+    response = db_client.get("/urls?q=shape.test")
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) >= 1
+    item = items[0]
+    assert "source" in item
+    assert item["source"] == "analyst1"
+    assert "score" not in item
+
+
 def test_list_urls_pagination(db_client):
     response = db_client.get("/urls?page=2&page_size=5")
     assert response.status_code == 200

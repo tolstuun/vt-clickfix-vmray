@@ -21,6 +21,14 @@ table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; }
 th, td { text-align: left; padding: 0.4rem 0.8rem; border-bottom: 1px solid #2a2a2a; font-size: 0.85rem; }
 th { color: #666; font-weight: normal; }
 tr:hover td { background: #222; }
+.badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 2px; font-size: 0.75rem; }
+.malicious.badge { background: #5a1a1a; }
+.suspicious.badge { background: #4a3a10; }
+.clean.badge { background: #1a3a1a; color: #55aa55; }
+.pending, .submitted, .analyzing, .done, .failed { background: #2a2a2a; color: #888; }
+.done { color: #55aa55; }
+.failed { color: #e05555; }
+.pager { margin-top: 0.8rem; font-size: 0.85rem; }
 nav { margin-bottom: 1.5rem; font-size: 0.85rem; }
 nav a { margin-right: 1rem; }
 </style>
@@ -124,5 +132,48 @@ nav a { margin-right: 1rem; }
   {% endif %}
 </table>
 {% endif %}
+
+<h2>URLs <span style="font-weight:normal;color:#555;font-size:0.85rem">— <a href="/urls/view">full list with filters</a></span></h2>
+<table>
+  <tr>
+    <th>URL</th>
+    <th>Domain</th>
+    <th>Source</th>
+    <th>Status</th>
+    <th>Verdict</th>
+    <th>Report</th>
+    <th>Created</th>
+  </tr>
+  {% for url in urls %}
+  <tr>
+    <td><a href="/urls/view/{{ url.id }}">{{ url.normalized_url[:70] }}{% if url.normalized_url|length > 70 %}…{% endif %}</a></td>
+    <td>{{ url.domain or "—" }}</td>
+    <td style="color:#666;font-size:0.78rem">{{ url.source or "—" }}</td>
+    <td><span class="badge {{ url.status }}">{{ url.status }}</span></td>
+    <td>
+      {% if url.verdict %}
+      <span class="badge {{ url.verdict }}">{{ url.verdict }}</span>
+      {% else %}—{% endif %}
+    </td>
+    <td>
+      {% if url.report_url %}
+      <a href="{{ url.report_url }}" target="_blank">VMRay ↗</a>
+      {% else %}—{% endif %}
+    </td>
+    <td>{{ url.created_at.strftime('%Y-%m-%d %H:%M') if url.created_at else "—" }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7" style="color:#555;text-align:center;padding:2rem">No URLs yet.</td></tr>
+  {% endfor %}
+</table>
+<div class="pager">
+  Page {{ page }} of {{ total_pages }} &nbsp;|&nbsp; {{ total }} total
+  {% if page > 1 %}
+  &nbsp;<a href="?page={{ page - 1 }}">← prev</a>
+  {% endif %}
+  {% if page < total_pages %}
+  &nbsp;<a href="?page={{ page + 1 }}">next →</a>
+  {% endif %}
+</div>
 </body>
 </html>
